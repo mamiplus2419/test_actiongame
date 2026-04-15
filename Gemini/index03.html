@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>DOT RUNNER - Stable Version</title>
+    <style>
+        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #222; color: #fff; font-family: 'Courier New', monospace; overflow: hidden; }
+        #game-container { position: relative; border: 4px solid #fff; }
+        canvas { display: block; background-color: #5C94FC; }
+        .ui { position: absolute; top: 10px; left: 10px; font-size: 18px; text-shadow: 2px 2px #000; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div class="ui">MISS: <span id="miss-count">0</span>/3 | TIME: <span id="timer">0</span>s</div>
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = 800; canvas.height = 400;
+
+// 設定
+const G = 0.6, FRICTION = 0.8, JUMP = -12, SPEED = 5, TILE = 40;
+let gameState = 'START', misses = 0, startTime = 0, elapsedTime = 0;
+const keys = {};
+
+// --- 描画関数群 (画像の代わりにコードで描く) ---
+function drawPlayer(x, y) {
+    ctx.fillStyle = "#FFF"; ctx.fillRect(x+8, y+8, 16, 16); // 体
+    ctx.fillStyle = "#000"; ctx.fillRect(x+10, y+12, 4, 4);  // 目
+    ctx.fillStyle = "#000"; ctx.fillRect(x+18, y+12, 4, 4); 
+    ctx.fillStyle = "#00D"; ctx.fillRect(x+6, y+24, 20, 8); // 足
+}
+
+function drawEnemy1(x, y) {
+    ctx.fillStyle = "#E00";
+    ctx.beginPath();
+    ctx.moveTo(x+15, y); ctx.lineTo(x+30, y+15); ctx.lineTo(x+15, y+30); ctx.lineTo(x, y+15);
+    ctx.fill();
+}
+
+function drawEnemy2(x, y) {
+    ctx.fillStyle = "#FF0"; ctx.fillRect(x+8, y+8, 16, 16);
+    ctx.fillStyle = "#000"; ctx.fillRect(x+12, y+12, 8, 8); // 単眼
+}
+
+function drawGoal(x, y) {
+    ctx.fillStyle = "#0F0"; ctx.fillRect(x, y, 40, 40);
+    ctx.strokeStyle = "#FFF"; ctx.strokeRect(x+5, y+5, 30, 30);
+}
+
+// --- ゲームロジック ---
+class Player {
+    constructor() { this.reset(); }
+    reset() { this.x = 50; this.y = 200; this.vx = 0; this.vy = 0; this.grounded = false; this.w = 32; this.h = 32; }
+    update() {
+        if (keys['ArrowLeft']) this.vx = -SPEED;
+        else if (keys['ArrowRight']) this.vx = SPEED;
+        else this.vx *= FRICTION;
+        if (keys['Space'] && this.grounded) { this.vy = JUMP; this.grounded = false; }
+        this.vy += G; this.x += this.vx; this.y += this.vy;
+        if (this.y + this.h > canvas.height - TILE) { this.y = canvas.height - TILE - this.h; this.vy = 0; this.grounded = true; }
+        if (this.x < 0) this.x = 0;
+        if (this.y > canvas.height) handleMiss();
+    }
+}
+
+class Enemy {
+    constructor(x, y, t) { this.x = x; this.y = y; this.t = t; this.w = 30; this.h = 30; this.d = -1; this.ay = y; this.ang = 0; }
+    update() {
+        this.x += (this.t === 1 ? 2 : 1.5) * this.d;
+        if (this.t === 2) { this.y = this.ay + Math.sin(this.ang) * 30; this.ang += 0.05; }
+        if (this.x < 100 || this.x > 750) this.d *= -1;
+    }
+}
+
+const player = new Player();
+let enemies = [new Enemy(400, 330, 1), new Enemy(650, 150, 2)];
+
+function handleMiss() {
+    misses++;
+    document.getElementById('miss-count').innerText = misses;
+    if (misses >= 3) gameState = 'GAMEOVER'; else player.reset();
+}
+
+function update() {
+    if (gameState === 'PLAYING') {
+        player.update();
+        enemies.forEach(e => { e.update(); if (hit(player, e)) handleMiss(); });
+        elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
+        document.getElementById('timer').innerText = elapsedTime;
+        if (player.x > canvas.width - 40) gameState = 'CLEAR';
+    } else if (keys['Space']) {
+        misses = 0; document.getElementById('miss-count').innerText = 0;
+        startTime = Date.now(); player.reset(); gameState = 'PLAYING';
+    }
+}
+
+function hit(a, b) {
+    const p = 6;
+    return a.x+p < b.x+b.w-p && a.x+a.w-p > b.x+p && a.y+p < b.y+b.h-p && a.y+a.h-p > b.y+p;
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // 地面
+    ctx.fillStyle = "#8B4513"; ctx.fillRect(0, canvas.height - TILE, canvas.width, TILE);
+    ctx.fillStyle = "#228B22"; ctx.fillRect(0, canvas.height - TILE, canvas.width, 10);
+    ctx.clearRect(500, canvas.height - TILE, 80, TILE); // 穴
+    
+    drawGoal(canvas.width - 50, canvas.height - TILE - 40);
+    drawPlayer(player.x, player.y);
+    enemies.forEach(e => { if(e.t===1) drawEnemy1(e.x, e.y); else drawEnemy2(e.x, e.y); });
+
+    if (gameState !== 'PLAYING') {
+        ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#fff"; ctx.textAlign = "center";
+        ctx.font = "bold 30px Courier"; ctx.fillText(gameState === 'START' ? "DOT RUNNER" : gameState, canvas.width/2, 180);
+        ctx.font = "20px Courier"; ctx.fillText("Press SPACE to Start", canvas.width/2, 230);
+    }
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+loop();
+
+</script>
+</body>
+</html>

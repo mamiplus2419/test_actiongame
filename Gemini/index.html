@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>DOT RUNNER - Simple 2D Action</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #222;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            border: 4px solid #fff;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        canvas {
+            display: block;
+            background-color: #5C94FC; /* FC風の空色 */
+        }
+        .ui-layer {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            pointer-events: none;
+            font-size: 18px;
+            text-shadow: 2px 2px #000;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div class="ui-layer">
+        MISS: <span id="miss-count">0</span>/3 | TIME: <span id="timer">0</span>s
+    </div>
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+/**
+ * 2D Action Game: "DOT RUNNER"
+ * Created for comparison and verification.
+ */
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const missDisplay = document.getElementById('miss-count');
+const timerDisplay = document.getElementById('timer');
+
+// ゲーム設定
+canvas.width = 800;
+canvas.height = 400;
+const GRAVITY = 0.6;
+const FRICTION = 0.8;
+const JUMP_FORCE = -12;
+const MOVE_SPEED = 5;
+const TILE_SIZE = 40;
+
+// ゲーム状態
+let gameState = 'START'; // START, PLAYING, GAMEOVER, CLEAR
+let misses = 0;
+let startTime = 0;
+let elapsedTime = 0;
+
+// キー入力管理
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// --- グラフィック資産 (SVG Base64) ---
+const assets = {
+    player: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBzaGFwZS1yZW5kZXJpbmc9ImNyaXNwRWRnZXMiPjxyZWN0IHg9IjQiIHk9IjQiIHdpZHRoPSI4IiBoZWlnaHQ9IjgiIGZpbGw9IiNmZmYiLz48cmVjdCB4PSI1IiB5PSI2IiB3aWR0aD0iMiIgaGVpZ2h0PSIyIiBmaWxsPSIjMDAwIi8+PHJlY3QgeD0iOSIgeT0iNiIgd2lkdGg9IjInIGhlaWdodD0iMiIgZmlsbD0iIzAwMCIvPjxyZWN0IHg9IjMiIHk9IjEyIiB3aWR0aD0iMTAiIGhlaWdodD0iNCIgZmlsbD0iIzAwZCJvPjwvc3ZnPg==",
+    enemy1: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBzaGFwZS1yZW5kZXJpbmc9ImNyaXNwRWRnZXMiPjxwYXRoIGQ9Ik04IDBsNCA0aDR2NGwtNCA0djRoLTRsLTQtNHYtNGwtNC00aDR6IiBmaWxsPSIjZTAwIi8+PC9zdmc+",
+    enemy2: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBzaGFwZS1yZW5kZXJpbmc9ImNyaXNwRWRnZXMiPjxyZWN0IHg9IjQiIHk9IjQiIHdpZHRoPSI4IiBoZWlnaHQ9IjgiIGZpbGw9IiNmZjAiLz48cmVjdCB4PSI2IiB5PSI2IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjMDAwIi8+PC9zdmc+",
+    goal: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNiAxNiIgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBzaGFwZS1yZW5kZXJpbmc9ImNyaXNwRWRnZXMiPjxyZWN0IHg9IjIiIHk9IjIiIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgZmlsbD0iIzBmMCIvPjwvc3ZnPg=="
+};
+
+const imgPlayer = new Image(); imgPlayer.src = assets.player;
+const imgEnemy1 = new Image(); imgEnemy1.src = assets.enemy1;
+const imgEnemy2 = new Image(); imgEnemy2.src = assets.enemy2;
+const imgGoal = new Image(); imgGoal.src = assets.goal;
+
+// --- クラス定義 ---
+class Player {
+    constructor() {
+        this.reset();
+    }
+    reset() {
+        this.x = 50;
+        this.y = 200;
+        this.width = 32;
+        this.height = 32;
+        this.vx = 0;
+        this.vy = 0;
+        this.grounded = false;
+    }
+    update() {
+        if (keys['ArrowLeft']) this.vx = -MOVE_SPEED;
+        else if (keys['ArrowRight']) this.vx = MOVE_SPEED;
+        else this.vx *= FRICTION;
+
+        if (keys['Space'] && this.grounded) {
+            this.vy = JUMP_FORCE;
+            this.grounded = false;
+        }
+
+        this.vy += GRAVITY;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // 床との判定 (簡易版)
+        if (this.y + this.height > canvas.height - TILE_SIZE) {
+            this.y = canvas.height - TILE_SIZE - this.height;
+            this.vy = 0;
+            this.grounded = true;
+        }
+
+        // 画面端ループ防止/制限
+        if (this.x < 0) this.x = 0;
+        
+        // 穴に落ちる判定
+        if (this.y > canvas.height) {
+            handleMiss();
+        }
+    }
+    draw() {
+        ctx.drawImage(imgPlayer, this.x, this.y, this.width, this.height);
+    }
+}
+
+class Enemy {
+    constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.width = 30;
+        this.height = 30;
+        this.type = type; // 1: 地上往復, 2: 浮遊
+        this.speed = type === 1 ? 2 : 1.5;
+        this.dir = -1;
+        this.initialY = y;
+        this.angle = 0;
+    }
+    update() {
+        if (this.type === 1) {
+            this.x += this.speed * this.dir;
+            if (this.x < 200 || this.x > 750) this.dir *= -1;
+        } else {
+            this.x += this.speed * this.dir;
+            this.y = this.initialY + Math.sin(this.angle) * 30;
+            this.angle += 0.05;
+            if (this.x < 100 || this.x > 700) this.dir *= -1;
+        }
+    }
+    draw() {
+        const img = this.type === 1 ? imgEnemy1 : imgEnemy2;
+        ctx.drawImage(img, this.x, this.y, this.width, this.height);
+    }
+}
+
+// インスタンス生成
+const player = new Player();
+let enemies = [
+    new Enemy(400, canvas.height - TILE_SIZE - 30, 1),
+    new Enemy(600, 150, 2),
+    new Enemy(750, canvas.height - TILE_SIZE - 30, 1)
+];
+
+function handleMiss() {
+    misses++;
+    missDisplay.innerText = misses;
+    if (misses >= 3) {
+        gameState = 'GAMEOVER';
+    } else {
+        player.reset();
+    }
+}
+
+function checkCollision(a, b) {
+    // 判定を少し甘くする（Hitboxの縮小）
+    const padding = 6;
+    return a.x + padding < b.x + b.width - padding &&
+           a.x + a.width - padding > b.x + padding &&
+           a.y + padding < b.y + b.height - padding &&
+           a.y + a.height - padding > b.y + padding;
+}
+
+function initGame() {
+    misses = 0;
+    missDisplay.innerText = misses;
+    startTime = Date.now();
+    player.reset();
+    gameState = 'PLAYING';
+}
+
+function update() {
+    if (gameState === 'PLAYING') {
+        player.update();
+        enemies.forEach(e => {
+            e.update();
+            if (checkCollision(player, e)) {
+                handleMiss();
+            }
+        });
+
+        elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
+        timerDisplay.innerText = elapsedTime;
+
+        // ゴール判定 (画面右端)
+        if (player.x > canvas.width - 40) {
+            gameState = 'CLEAR';
+        }
+    } else {
+        if (keys['Space']) {
+            if (gameState === 'START' || gameState === 'GAMEOVER' || gameState === 'CLEAR') {
+                initGame();
+            }
+        }
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 背景（雲や遠景）
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.fillRect(100, 80, 60, 20);
+    ctx.fillRect(400, 50, 80, 25);
+
+    // 地面
+    ctx.fillStyle = "#8B4513";
+    ctx.fillRect(0, canvas.height - TILE_SIZE, canvas.width, TILE_SIZE);
+    ctx.fillStyle = "#228B22";
+    ctx.fillRect(0, canvas.height - TILE_SIZE, canvas.width, 10);
+
+    // 穴（ステージギミックとしての隙間）
+    ctx.clearRect(500, canvas.height - TILE_SIZE, 80, TILE_SIZE);
+
+    // ゴール
+    ctx.drawImage(imgGoal, canvas.width - 50, canvas.height - TILE_SIZE - 40, 40, 40);
+
+    player.draw();
+    enemies.forEach(e => e.draw());
+
+    // オーバーレイ表示
+    if (gameState === 'START') {
+        drawOverlay("DOT RUNNER", "Press SPACE to Start");
+    } else if (gameState === 'GAMEOVER') {
+        drawOverlay("GAME OVER", "Press SPACE to Retry");
+    } else if (gameState === 'CLEAR') {
+        drawOverlay("STAGE CLEAR!", `Time: ${elapsedTime}s | Press SPACE`);
+    }
+}
+
+function drawOverlay(title, sub) {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 40px Courier New";
+    ctx.textAlign = "center";
+    ctx.fillText(title, canvas.width/2, canvas.height/2 - 20);
+    ctx.font = "20px Courier New";
+    ctx.fillText(sub, canvas.width/2, canvas.height/2 + 30);
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
